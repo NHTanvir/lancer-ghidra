@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>lancer-ghidra</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --accent: #58a6ff;
+    --muted: #8b949e;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 13px;
+  }
+  header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  header h1 { margin: 0; font-size: 14px; font-weight: 600; }
+  header .meta { color: var(--muted); }
+  .layout { display: grid; grid-template-columns: 320px 1fr; height: calc(100vh - 41px); }
+  .sidebar { background: var(--panel); border-right: 1px solid var(--border); overflow: auto; display: flex; flex-direction: column; }
+  .sidebar .tabs { display: flex; flex-wrap: wrap; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .sidebar .tabs button {
+    background: transparent;
+    color: var(--text);
+    border: none;
+    padding: 6px 10px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    font-size: 12px;
+  }
+  .sidebar .tabs button.active { border-bottom-color: var(--accent); color: var(--accent); }
+  #list { overflow: auto; flex: 1; }
+  .sidebar ul { list-style: none; padding: 0; margin: 0; }
+  .sidebar li {
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sidebar li:hover { background: rgba(88,166,255,0.1); }
+  .sidebar li.active { background: rgba(88,166,255,0.2); }
+  .main { overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+  .main h2 { font-size: 15px; margin: 0; color: var(--accent); }
+  pre {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 12px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    overflow: auto;
+    margin: 0;
+  }
+  .disasm-line {
+    display: grid;
+    grid-template-columns: 110px 200px 1fr;
+    gap: 12px;
+    line-height: 1.5;
+  }
+  .disasm-line .addr { color: var(--muted); }
+  .disasm-line .bytes { color: var(--yellow); }
+  .disasm-line .text { color: var(--text); }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
+  th { color: var(--accent); font-weight: 600; }
+  .section-fn { margin-bottom: 24px; }
+  .section-fn h3 { font-size: 13px; color: var(--muted); margin: 0 0 8px 0; font-weight: 400; }
+  /* AI panel */
+  .ai-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 12px; }
+  .ai-panel h3 { margin: 0 0 8px 0; font-size: 13px; color: var(--accent); }
+  .ai-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .ai-toolbar button {
+    background: var(--accent);
+    color: #000;
+    border: none;
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .ai-toolbar button:disabled { background: var(--muted); cursor: not-allowed; }
+  .ai-toolbar .hint { color: var(--muted); font-size: 11px; }
+  .ai-output {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    padding: 10px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    min-height: 80px;
+    max-height: 400px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text);
+  }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .xref-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .xref-item { background: var(--panel); border: 1px solid var(--border); padding: 2px 8px; border-radius: 3px; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px; cursor: pointer; }
+  .xref-item:hover { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>lancer-ghidra</h1>
+  <span class="meta" id="meta">loading…</span>
+</header>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="tabs">
+      <button data-tab="functions" class="active">Functions</button>
+      <button data-tab="sections">Sections</button>
+      <button data-tab="strings">Strings</button>
+      <button data-tab="imports">Imports</button>
+      <button data-tab="exports">Exports</button>
+    </div>
+    <div id="list"></div>
+  </aside>
+  <main class="main" id="main">
+    <h2 id="title">Select a function</h2>
+    <div id="content"></div>
+  </main>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+let state = { tab: 'functions', selected: null };
+
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  return r.json();
+}
+async function fetchText(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(await r.text());
+  return r.text();
+}
+
+function hex64(n) { return '0x' + BigInt(n).toString(16); }
+
+async function loadInfo() {
+  const info = await fetchJSON('/api/info');
+  $('meta').textContent = `${info.format} • ${info.arch} • entry ${hex64(info.entry)} • ${info.function_count} fns • ${info.section_count} sects`;
+  document.title = `${info.path.split(/[\\/]/).pop()} — lancer-ghidra`;
+}
+
+async function loadList(tab) {
+  state.tab = tab;
+  for (const b of document.querySelectorAll('.tabs button')) {
+    b.classList.toggle('active', b.dataset.tab === tab);
+  }
+  const list = $('list');
+  list.innerHTML = '<ul id="items"></ul>';
+  const ul = $('items');
+
+  if (tab === 'functions') {
+    const fns = await fetchJSON('/api/functions');
+    for (const f of fns) {
+      const li = document.createElement('li');
+      li.textContent = `${hex64(f.entry)}  ${f.name}`;
+      li.onclick = () => showFunction(f);
+      ul.appendChild(li);
+    }
+  } else if (tab === 'sections') {
+    const ss = await fetchJSON('/api/sections');
+    for (const s of ss) {
+      const li = document.createElement('li');
+      const perms = (s.readable ? 'r' : '-') + (s.writable ? 'w' : '-') + (s.executable ? 'x' : '-');
+      li.textContent = `${s.name}  ${hex64(s.vaddr)}  ${perms}`;
+      li.onclick = () => showSection(s);
+      ul.appendChild(li);
+    }
+  } else if (tab === 'strings') {
+    const ss = await fetchJSON('/api/strings');
+    for (const s of ss.slice(0, 2000)) {
+      const li = document.createElement('li');
+      li.textContent = `${hex64(s.vaddr)}  ${s.value}`;
+      ul.appendChild(li);
+    }
+  } else if (tab === 'imports') {
+    const imps = await fetchJSON('/api/imports');
+    for (const imp of imps) {
+      const li = document.createElement('li');
+      const lib = imp.library ? `[${imp.library}] ` : '';
+      li.textContent = `${lib}${imp.name}`;
+      ul.appendChild(li);
+    }
+  } else if (tab === 'exports') {
+    const exps = await fetchJSON('/api/exports');
+    for (const exp of exps) {
+      const li = document.createElement('li');
+      li.textContent = `${hex64(exp.address)}  ${exp.name}`;
+      ul.appendChild(li);
+    }
+  }
+}
+
+async function showFunction(f) {
+  state.selected = f;
+  $('title').textContent = `${f.name}  ${hex64(f.entry)}  (${f.size} bytes, ${f.source})`;
+  const content = $('content');
+  content.innerHTML = '';
+
+  // Disassembly section
+  const disasmSec = document.createElement('div');
+  disasmSec.className = 'section-fn';
+  const disasmH = document.createElement('h3');
+  disasmH.textContent = 'Disassembly';
+  disasmSec.appendChild(disasmH);
+
+  const [insns, xrefs] = await Promise.all([
+    fetchJSON(`/api/disasm?addr=${f.entry}`),
+    fetchJSON(`/api/xrefs?addr=${f.entry}`),
+  ]);
+
+  const pre = document.createElement('pre');
+  for (const i of insns) {
+    const line = document.createElement('div');
+    line.className = 'disasm-line';
+    const bytesHex = i.bytes ? i.bytes.map(b => b.toString(16).padStart(2,'0')).join(' ') : '';
+    line.innerHTML = `<span class="addr">${hex64(i.address)}</span><span class="bytes">${bytesHex}</span><span class="text">${escapeHtml(i.text)}</span>`;
+    pre.appendChild(line);
+  }
+  disasmSec.appendChild(pre);
+  content.appendChild(disasmSec);
+
+  // Cross-references section
+  if (xrefs.to && xrefs.to.length) {
+    const xrefSec = document.createElement('div');
+    xrefSec.className = 'section-fn';
+    const xrefH = document.createElement('h3');
+    xrefH.textContent = `Cross-references to this function (${xrefs.to.length})`;
+    xrefSec.appendChild(xrefH);
+    const xrefList = document.createElement('div');
+    xrefList.className = 'xref-list';
+    for (const x of xrefs.to) {
+      const item = document.createElement('span');
+      item.className = 'xref-item';
+      item.textContent = hex64(x);
+      xrefList.appendChild(item);
+    }
+    xrefSec.appendChild(xrefList);
+    content.appendChild(xrefSec);
+  }
+
+  // CFG section
+  const cfgSec = document.createElement('div');
+  cfgSec.className = 'section-fn';
+  const cfgH = document.createElement('h3');
+  cfgH.textContent = 'Control Flow Graph (DOT)';
+  cfgSec.appendChild(cfgH);
+  try {
+    const cfg = await fetchJSON(`/api/cfg?addr=${f.entry}`);
+    const cfgPre = document.createElement('pre');
+    cfgPre.textContent = buildDotText(cfg);
+    cfgPre.style.maxHeight = '200px';
+    cfgSec.appendChild(cfgPre);
+  } catch (e) {
+    cfgSec.appendChild(Object.assign(document.createElement('span'), { textContent: 'CFG unavailable', style: 'color: var(--muted)' }));
+  }
+  content.appendChild(cfgSec);
+
+  // AI decompile panel
+  const aiPanel = document.createElement('div');
+  aiPanel.className = 'ai-panel section-fn';
+  aiPanel.innerHTML = `
+    <h3>AI Decompile</h3>
+    <div class="ai-toolbar">
+      <button id="btn-prompt">Get Prompt</button>
+      <button id="btn-send">Send to LLM (requires ANTHROPIC_API_KEY)</button>
+      <span class="hint" id="ai-status"></span>
+    </div>
+    <div class="ai-output" id="ai-output">Click a button above to get the decompile prompt or send it to the LLM.</div>
+  `;
+  content.appendChild(aiPanel);
+
+  document.getElementById('btn-prompt').onclick = async () => {
+    const btn = document.getElementById('btn-prompt');
+    const out = document.getElementById('ai-output');
+    const status = document.getElementById('ai-status');
+    btn.disabled = true;
+    status.innerHTML = '<span class="spinner"></span>';
+    try {
+      const prompt = await fetchText(`/api/ai-decompile?addr=${f.entry}&send=0`);
+      out.textContent = prompt;
+    } catch (e) {
+      out.textContent = 'Error: ' + e.message;
+    } finally {
+      btn.disabled = false;
+      status.innerHTML = '';
+    }
+  };
+
+  document.getElementById('btn-send').onclick = async () => {
+    const btn = document.getElementById('btn-send');
+    const out = document.getElementById('ai-output');
+    const status = document.getElementById('ai-status');
+    btn.disabled = true;
+    status.innerHTML = '<span class="spinner"></span> Calling LLM (may take ~30s)…';
+    try {
+      const reply = await fetchText(`/api/ai-decompile?addr=${f.entry}&send=1`);
+      out.textContent = reply;
+    } catch (e) {
+      out.textContent = 'Error: ' + e.message;
+    } finally {
+      btn.disabled = false;
+      status.innerHTML = '';
+    }
+  };
+}
+
+function buildDotText(cfg) {
+  if (!cfg || !cfg.blocks) return 'digraph { }';
+  let dot = `digraph fn_${cfg.function ? BigInt(cfg.function).toString(16) : '?'} {\n  rankdir=TB;\n`;
+  for (const b of cfg.blocks) {
+    const label = `0x${BigInt(b.start).toString(16)}\\n${b.instructions.length} insns`;
+    dot += `  b${BigInt(b.start).toString(16)} [label="${label}" shape=box fontname="monospace" fontsize=10];\n`;
+  }
+  for (const [src, dst, kind] of (cfg.edges || [])) {
+    const color = kind === 'Fall' ? '#8b949e' : kind === 'Jump' ? '#58a6ff' : '#3fb950';
+    dot += `  b${BigInt(src).toString(16)} -> b${BigInt(dst).toString(16)} [color="${color}" label="${kind}"];\n`;
+  }
+  dot += '}';
+  return dot;
+}
+
+function showSection(s) {
+  $('title').textContent = `${s.name}  ${hex64(s.vaddr)} .. ${hex64(BigInt(s.vaddr) + BigInt(s.size))}`;
+  $('content').innerHTML = `<table>
+    <tr><th>vaddr</th><td>${hex64(s.vaddr)}</td></tr>
+    <tr><th>size</th><td>${s.size}</td></tr>
+    <tr><th>file_offset</th><td>${hex64(s.file_offset)}</td></tr>
+    <tr><th>readable</th><td>${s.readable}</td></tr>
+    <tr><th>writable</th><td>${s.writable}</td></tr>
+    <tr><th>executable</th><td>${s.executable}</td></tr>
+  </table>`;
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+for (const b of document.querySelectorAll('.tabs button')) {
+  b.onclick = () => loadList(b.dataset.tab);
+}
+
+loadInfo();
+loadList('functions');
+</script>
+</body>
+</html>
